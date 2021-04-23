@@ -1,5 +1,5 @@
-This is a fork of burntsushi/migration that's written to work with github.com/jackc/pgx
-instead of database/sql.
+This is a fork of github.com/BurntSushi/migration that's written to work with
+github.com/jackc/pgx instead of database/sql.
 
 Package migration for Golang automatically handles versioning of a database 
 schema by applying a series of migrations supplied by the client. It uses 
@@ -22,22 +22,19 @@ The version of a database is defined as the number of migrations applied to it.
 
 ### Installation
 
-If you have Go installed and
-[your GOPATH is setup](http://golang.org/doc/code.html#GOPATH), then 
-`migration` can be installed with `go get`:
+If you have Go installed, then  `migration` can be installed with `go get`:
 
-    go get github.com/BurntSushi/migration
+    go get github.com/echlebek/migration
 
 
 ### Documentation
 
 Documentation is available at
-[godoc.org/github.com/BurntSushi/migration](http://godoc.org/github.com/BurntSushi/migration).
+[godoc.org/github.com/echlebek/migration](http://godoc.org/github.com/echlebek/migration).
 
 
 ### Unstable
 
-At the moment, I'm still experimenting with the public API, so I may still 
-introduce breaking changes. In general though, I am happy with the overall 
-architecture.
-
+This is a fork of a project that was released with the caveat that it is unstable.
+That was 8 years ago, so it seems BurntSushi has been happy with the interface. :)
+This fork of the library should be considered *more* unstable.
