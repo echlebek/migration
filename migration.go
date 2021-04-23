@@ -1,8 +1,12 @@
 package migration
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
+
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 var ef = fmt.Errorf
@@ -10,14 +14,12 @@ var ef = fmt.Errorf
 // LimitedTx specifies the behavior of a transaction *without* commit and
 // rollback functions. Values with this type are given to client functions.
 // In particular, the migration routines in this package
-// handle transaction commits and rollbacks. Therefore the functions provided 
+// handle transaction commits and rollbacks. Therefore the functions provided
 // by the client should not use them.
 type LimitedTx interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-	Prepare(query string) (*sql.Stmt, error)
-	Query(query string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(query string, args ...interface{}) *sql.Row
-	Stmt(stmt *sql.Stmt) *sql.Stmt
+	Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error)
+	Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row
 }
 
 // GetVersion is any function that can retrieve the migration version of a
@@ -94,8 +96,8 @@ type Migrator func(LimitedTx) error
 // The details of how the version is stored are opaque to the client, but in
 // general, it will add a table to your database called "migration_version"
 // with a single column containing a single row.
-func Open(driver, dsn string, migrations []Migrator) (*sql.DB, error) {
-	return OpenWith(driver, dsn, migrations, nil, nil)
+func Open(config *pgxpool.Config, migrations []Migrator) (*pgxpool.Pool, error) {
+	return OpenWith(config, migrations, nil, nil)
 }
 
 // OpenWith is exactly like Open, except it allows the client to specify their
@@ -106,10 +108,10 @@ func Open(driver, dsn string, migrations []Migrator) (*sql.DB, error) {
 // If vget and vset are both set to nil, then the behavior of this
 // function is identical to the behavior of Open.
 func OpenWith(
-	driver, dsn string,
+	config *pgxpool.Config,
 	migrations []Migrator,
 	vget GetVersion, vset SetVersion,
-) (*sql.DB, error) {
+) (*pgxpool.Pool, error) {
 	if (vget == nil && vset != nil) || (vget != nil && vset == nil) {
 		panic("vget/vset must both be nil or both be non-nil")
 	}
@@ -120,26 +122,21 @@ func OpenWith(
 		vset = DefaultSetVersion
 	}
 
-	db, err := sql.Open(driver, dsn)
+	pool, err := pgxpool.ConnectConfig(context.Background(), config)
 	if err != nil {
 		return nil, err
 	}
-	if err := (migration{db, migrations, vget, vset}).migrate(); err != nil {
+	if err := (migration{pool, migrations, vget, vset}).migrate(); err != nil {
 		return nil, err
 	}
-	return db, nil
+	return pool, nil
 }
 
 type migration struct {
-	*sql.DB
+	*pgxpool.Pool
 	migrations []Migrator
 	getVersion GetVersion
 	setVersion SetVersion
-}
-
-// Stmt satisfies the LimitedTx interface.
-func (m migration) Stmt(stmt *sql.Stmt) *sql.Stmt {
-	return stmt
 }
 
 func (m migration) migrate() error {
@@ -156,13 +153,13 @@ func (m migration) migrate() error {
 		return nil
 	}
 
-	tx, err := m.Begin()
+	tx, err := m.Begin(context.Background())
 	if err != nil {
 		return ef("Could not start transaction: %s", err)
 	}
 	for i := dbVersion; i < libVersion; i++ {
 		if err := m.migrations[i](tx); err != nil {
-			if err2 := tx.Rollback(); err2 != nil {
+			if err2 := tx.Rollback(context.Background()); err2 != nil {
 				return ef(
 					"When migrating from %d to %d, got error '%s' and "+
 						"got error '%s' after trying to rollback.",
@@ -174,7 +171,7 @@ func (m migration) migrate() error {
 		}
 	}
 	if err := m.setVersion(tx, libVersion); err != nil {
-		if err2 := tx.Rollback(); err2 != nil {
+		if err2 := tx.Rollback(context.Background()); err2 != nil {
 			return ef(
 				"When trying to set version to %d (from %d), got error '%s' "+
 					"and got error '%s' after trying to rollback.",
@@ -185,7 +182,7 @@ func (m migration) migrate() error {
 				"and successfully rolled back.",
 			libVersion, dbVersion, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(context.Background()); err != nil {
 		return ef("Error committing migration from %d to %d: %s",
 			dbVersion, libVersion, err)
 	}
@@ -215,7 +212,7 @@ func defaultSetVersion(tx LimitedTx, version int) error {
 
 func getVersion(tx LimitedTx) (int, error) {
 	var version int
-	r := tx.QueryRow("SELECT version FROM migration_version")
+	r := tx.QueryRow(context.Background(), "SELECT version FROM migration_version")
 	if err := r.Scan(&version); err != nil {
 		return 0, err
 	}
@@ -223,12 +220,12 @@ func getVersion(tx LimitedTx) (int, error) {
 }
 
 func setVersion(tx LimitedTx, version int) error {
-	_, err := tx.Exec("UPDATE migration_version SET version = $1", version)
+	_, err := tx.Exec(context.Background(), "UPDATE migration_version SET version = $1", version)
 	return err
 }
 
 func createVersionTable(tx LimitedTx) error {
-	_, err := tx.Exec(`
+	_, err := tx.Exec(context.Background(), `
 		CREATE TABLE migration_version (
 			version INTEGER
 		);
