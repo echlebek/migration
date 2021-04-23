@@ -1,3 +1,6 @@
+This is a fork of burntsushi/migration that's written to work with github.com/jackc/pgx
+instead of database/sql.
+
 Package migration for Golang automatically handles versioning of a database 
 schema by applying a series of migrations supplied by the client. It uses 
 features only from the database/sql package, so it tries to be driver 
