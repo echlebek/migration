@@ -122,7 +122,7 @@ func OpenWith(
 		vset = DefaultSetVersion
 	}
 
-	pool, err := pgxpool.ConnectConfig(context.Background(), config)
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		return nil, err
 	}
